@@ -18,12 +18,14 @@ classifiers = [
 ]
 requires-python = ">=3.10, <3.14"
 dependencies = [
+    "attr>=0.3.2",
     "huggingface_hub",
     "loguru",
-    "misaki[en]>=0.9.4",
+    "misaki[en,zh]",
     "numpy",
+    "pip>=26.0.1",
     "torch",
-    "transformers"
+    "transformers",
 ]
 
 [project.scripts]
@@ -41,6 +43,7 @@ Repository = "https://github.com/hexgrad/kokoro"
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
 ]
+misaki = { git = "https://github.com/chang-ph/misaki.git", rev = "cph" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

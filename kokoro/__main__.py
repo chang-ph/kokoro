@@ -15,7 +15,7 @@ espeak not installed: `apt-get install espeak-ng`
 import argparse
 import wave
 from pathlib import Path
-from typing import Generator, TYPE_CHECKING
+from typing import TYPE_CHECKING, Generator
 
 import numpy as np
 from loguru import logger
@@ -37,18 +37,33 @@ if TYPE_CHECKING:
 
 
 def generate_audio(
-    text: str, kokoro_language: str, voice: str, speed=1
+    text: str, kokoro_language: str, voice: str, speed: float, repo_id: str
 ) -> Generator["KPipeline.Result", None, None]:
     from kokoro import KPipeline
 
     if not voice.startswith(kokoro_language):
         logger.warning(f"Voice {voice} is not made for language {kokoro_language}")
-    pipeline = KPipeline(lang_code=kokoro_language)
+
+    en_pipeline = KPipeline(lang_code="a", repo_id=repo_id, model=False)
+
+    def en_callable(text: str):
+        return next(en_pipeline(text)).phonemes
+
+    pipeline = KPipeline(
+        lang_code=kokoro_language,
+        repo_id=repo_id,
+        en_callable=en_callable,
+    )
     yield from pipeline(text, voice=voice, speed=speed, split_pattern=r"\n+")
 
 
 def generate_and_save_audio(
-    output_file: Path, text: str, kokoro_language: str, voice: str, speed=1
+    output_file: Path,
+    text: str,
+    kokoro_language: str,
+    voice: str,
+    speed: float,
+    repo_id: str,
 ) -> None:
     with wave.open(str(output_file.resolve()), "wb") as wav_file:
         wav_file.setnchannels(1)  # Mono audio
@@ -56,7 +71,11 @@ def generate_and_save_audio(
         wav_file.setframerate(24000)  # Sample rate
 
         for result in generate_audio(
-            text, kokoro_language=kokoro_language, voice=voice, speed=speed
+            text,
+            kokoro_language=kokoro_language,
+            voice=voice,
+            speed=speed,
+            repo_id=repo_id,
         ):
             logger.debug(result.phonemes)
             if result.audio is None:
@@ -111,6 +130,11 @@ def main() -> None:
         action="store_true",
         help="Print DEBUG messages to console",
     )
+    parser.add_argument(
+        "--repo_id",
+        default="hexgrad/Kokoro-82M-v1.1-zh",
+        help="ID the HF repo containing the model",
+    )
     args = parser.parse_args()
     if args.debug:
         logger.level("DEBUG")
@@ -127,21 +151,26 @@ def main() -> None:
         text = file.read_text()
     else:
         import sys
+
         print("Press Ctrl+D to stop reading input and start generating", flush=True)
-        text = '\n'.join(sys.stdin)
+        text = "\n".join(sys.stdin)
 
     logger.debug(f"Input text: {text!r}")
 
     out_file: Path = args.output_file
     if not out_file.suffix == ".wav":
         logger.warning("The output file name should end with .wav")
-    generate_and_save_audio(
-        output_file=out_file,
-        text=text,
-        kokoro_language=lang,
-        voice=args.voice,
-        speed=args.speed,
-    )
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for i, line in enumerate(lines):
+        generate_and_save_audio(
+            output_file=Path(str(out_file).format(i)),
+            text=line,
+            kokoro_language=lang,
+            voice=args.voice,
+            speed=args.speed,
+            repo_id=args.repo_id,
+        )
 
 
 if __name__ == "__main__":
