@@ -13,12 +13,17 @@ espeak not installed: `apt-get install espeak-ng`
 """
 
 import argparse
+import hashlib
+import shutil
 import wave
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator
 
 import numpy as np
 from loguru import logger
+
+# Cache directory
+CACHE_DIR = Path.home() / ".cache" / "kokoro"
 
 languages = [
     "a",  # American English
@@ -57,6 +62,23 @@ def generate_audio(
     yield from pipeline(text, voice=voice, speed=speed, split_pattern=r"\n+")
 
 
+def _get_cache_key(
+    text: str,
+    kokoro_language: str,
+    voice: str,
+    speed: float,
+    repo_id: str,
+) -> str:
+    """Generate a cache key from input parameters."""
+    key_string = f"{text}|{kokoro_language}|{voice}|{speed}|{repo_id}"
+    return hashlib.sha256(key_string.encode()).hexdigest()
+
+
+def _get_cache_path(cache_key: str) -> Path:
+    """Get the cache file path for a given cache key."""
+    return CACHE_DIR / f"{cache_key}.wav"
+
+
 def generate_and_save_audio(
     output_file: Path,
     text: str,
@@ -65,6 +87,20 @@ def generate_and_save_audio(
     speed: float,
     repo_id: str,
 ) -> None:
+    # Ensure cache directory exists
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Generate cache key and check cache
+    cache_key = _get_cache_key(text, kokoro_language, voice, speed, repo_id)
+    cache_path = _get_cache_path(cache_key)
+
+    if cache_path.exists():
+        logger.debug(f"Cache hit: {cache_path}")
+        shutil.copy2(str(cache_path), str(output_file.resolve()))
+        return
+
+    # Cache miss - generate audio
+    logger.debug("Cache miss - generating audio")
     with wave.open(str(output_file.resolve()), "wb") as wav_file:
         wav_file.setnchannels(1)  # Mono audio
         wav_file.setsampwidth(2)  # 2 bytes per sample (16-bit audio)
@@ -82,6 +118,10 @@ def generate_and_save_audio(
                 continue
             audio_bytes = (result.audio.numpy() * 32767).astype(np.int16).tobytes()
             wav_file.writeframes(audio_bytes)
+
+    # Save to cache (copy the generated file)
+    shutil.copy2(str(output_file.resolve()), str(cache_path))
+    logger.debug(f"Cached audio to: {cache_path}")
 
 
 def main() -> None:
